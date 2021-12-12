@@ -9,34 +9,49 @@ contract TaxiBusiness {
     uint balance;
 
     struct Participant{
-        address adr;
+        address payable adr;
         uint balance;
     }
 
     struct CarDealer{
-        address adr;       
-        uint id;
-        uint proposedPrice;
-        uint timeOfValidation;
-        bool isApproved;
-    }
-
-    struct TaxiDriver{
-        address adr;
-        uint salary;
-        uint balance;
-        bool isApproved;
-        uint approvedVoteCount;
-        uint lastSalaryTime;
+        address payable adr;     
+        uint ballance;  
     }
 
     CarDealer carDealer;
 
+    struct ProposedCar{
+        uint32 carId;
+        uint price;
+        uint timeOfValidation;
+        bool isApproved;
+        uint approvedVotesCount;
+    }
+
+    ProposedCar proposedCar;
+
+    // repurchase car olayı yok!
+
+    struct TaxiDriver{
+        address payable adr;
+        uint salary;
+        bool isApproved;
+        uint approvedVotesCount;
+        uint lastSalaryTime;
+    }
+
     TaxiDriver taxiDriver;
 
-     // addresses -> participant mapping
+    uint32 ownedCar;
+
+
+    // addresses -> participant mapping
     mapping (address => Participant) participants;
-    
+    mapping (address => bool) carVotes;
+    mapping (address => bool) driverVotes;
+    mapping (address => bool) repurchaseVotes;
+
+
     // list of addresses of participants to use in vote counting
     address[] participantsAddresses;
 
@@ -57,8 +72,6 @@ contract TaxiBusiness {
 
 
 
-
-    
 
     // modifier to check if caller is manager
     modifier isManager() {
@@ -86,23 +99,19 @@ contract TaxiBusiness {
 
 
 
-    constructor(){
+    constructor(address payable newCarDealer){
         manager = msg.sender;
         balance = 0;
         maintenanceFee = 10 ether;
         lastMaintenance = block.timestamp;
         lastPayTime = block.timestamp;
         participationFee = 80 ether;
+        carDealer = CarDealer(newCarDealer, 0);
     }
 
 
-    /**
-     * max 9 participants can join
-     * caller of this function must pay 100 or more ether
-     * excess ether will be returned
-     */
     function joinAsParticipant() public payable {
-        require(participantsAddresses.length < 9, "No place left for participants");
+        require(participantsAddresses.length < 9, "Maximum participant count reached");
         require(participants[msg.sender].adr == address(0), "You already joined as participant");
         require(msg.value >= participationFee, "You don't have enough ether to join");
         participants[msg.sender] = Participant(msg.sender, 0 ether);
@@ -110,16 +119,99 @@ contract TaxiBusiness {
         balance += participationFee;
         uint refund = msg.value - participationFee;
         if(refund > 0) msg.sender.transfer(refund);
+
     }
 
 
-    /**
-     * customers call this function to pay charge
-     */
-    function payTaxiCharge() public payable {
+    function carProposeToBusinesss (uint price, uint validTime) public isCarDealer {
+        require(ownedCar == 0, "There is already a car in business");
+        proposedCar = ProposedCar(1, price, block.timestamp + (validTime * 1 days), false, 0);
+        
+         for(uint i = 0; i < participantsAddresses.length; i++){
+            carVotes[participantsAddresses[i]] = false;
+        }
+    }
+
+
+    function approvePurchaseCar() public isParticipant{
+        require(!carVotes[msg.sender], "This participant already voted!");
+        proposedCar.approvedVotesCount += 1;
+        carVotes[msg.sender] = true;
+
+        if(proposedCar.approvedVotesCount >= (participantsAddresses.length/2)){
+            purchaseCar();
+        }
+    }
+
+    function purchaseCar() public payable{
+        require(balance>=proposedCar.price, "Contract doesn't have enough ether!");
+        require(block.timestamp <= proposedCar.timeOfValidation, "Valid time for proposal has passed!");
+        require(proposedCar.isApproved == false,"this car already approved");
+        require(proposedCar.approvedVotesCount >= (participantsAddresses.length/2) ,"Not enough approval!");
+        balance -= proposedCar.price;
+        if(!carDealer.adr.send(proposedCar.price)){
+            balance += proposedCar.price;
+            revert();
+        }
+        ownedCar = proposedCar.carId;
+        proposedCar.isApproved = true
+    }
+
+    function proposeDriver(uint expectedSalary) public payable{
+        require(ownedCar == 1, "no owned car");
+        require(!taxiDriver.isApproved, "There is a taxi driver already!");
+        taxiDriver = TaxiDriver(msg.sender, expectedSalary, false, 0, block.timestamp);
+        for(uint i = 0; i < participantsAddresses.length; i++){
+            driverVotes[participantsAddresses[i]] = false;
+        }
+    }
+
+    function approveDriver() public isParticipant{
+        require(!driverVotes[msg.sender], "This participant already voted!");
+        taxiDriver.approvedVotesCount += 1;
+        driverVotes[msg.sender] = true;
+
+        if (taxiDriver.approvedVotesCount >= (participantsAddresses.length/2)){
+
+        }
+    }
+
+
+    function setDriver() public payable{
+        require(taxiDriver.isApproved == false, "this driver already approved");
+        require(taxiDriver.approvedVotesCount >= (participantsAddresses.length/2), "not enough votes");
+        taxiDriver.isApproved = true;
+        taxiDriver.approvedVotesCount = 0;
+        for(uint i = 0; i < participantsAddresses.length; i++){
+            driverVotes[participantsAddresses[i]] = false;
+        }
+    }
+
+    
+
+    function fireDriver() public payable{
+        require(taxiDriver.isApproved == true, "No approved driver!");
+        balance -= taxiDriver.salary;
+        if(!taxiDriver.adr.send(taxiDriver.salary)){
+            balance += taxiDriver.salary;
+            revert();
+        }
+        delete taxiDriver;
+    }
+
+    function leaveJob() public isDriver{
+        fireDriver();
+    }
+
+
+    function getCharge() public payable {
         balance += msg.value;
     }
     
+
+
+
+
   
     /**
      * fallback function
