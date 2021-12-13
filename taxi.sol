@@ -29,6 +29,7 @@ contract TaxiBusiness {
     }
 
     ProposedCar proposedCar;
+    ProposedCar repurchaseCar;
 
     // repurchase car olayı yok!
 
@@ -132,12 +133,13 @@ contract TaxiBusiness {
 
 
     function approvePurchaseCar() public isParticipant{
+        require(proposedCar.carId == 1, "no proposed car in business");
         require(!carVotes[msg.sender], "This participant already voted!");
         require(ownedCar == 0, "There is already a car in business");
         proposedCar.approvedVotesCount += 1;
         carVotes[msg.sender] = true;
 
-        if(proposedCar.approvedVotesCount >= (participantsAddresses.length/2)){
+        if(proposedCar.approvedVotesCount > (participantsAddresses.length/2)){
             purchaseCar();
         }
     }
@@ -146,7 +148,7 @@ contract TaxiBusiness {
         require(balance>=proposedCar.price, "Contract doesn't have enough ether!");
         require(block.timestamp <= proposedCar.timeOfValidation, "Valid time for proposal has passed!");
         require(proposedCar.isApproved == false,"this car already approved");
-        require(proposedCar.approvedVotesCount >= (participantsAddresses.length/2) ,"Not enough approval!");
+        require(proposedCar.approvedVotesCount > (participantsAddresses.length/2) ,"Not enough approval!");
         balance -= proposedCar.price;
         if(!carDealer.adr.send(proposedCar.price)){
             balance += proposedCar.price;
@@ -156,10 +158,43 @@ contract TaxiBusiness {
         proposedCar.isApproved = true;
     }
 
+
+    function repurchaseCarPropose(uint price, uint validTime) public isCarDealer{
+        repurchaseCar = ProposedCar(1, price, block.timestamp + (validTime * 1 days), false, 0);
+         for(uint i = 0; i < participantsAddresses.length; i++){
+            repurchaseVotes[participantsAddresses[i]] = false;
+        }
+    }
+
+    function repurchaseCarOp() public payable{
+        require(balance>=repurchaseCar.price, "Contract doesn't have enough ether!");
+        require(block.timestamp <= repurchaseCar.timeOfValidation, "Valid time for proposal has passed!");
+        require(repurchaseCar.isApproved == false,"this car already selled");
+        require(repurchaseCar.approvedVotesCount > (participantsAddresses.length/2) ,"Not enough approval!");
+        balance -= repurchaseCar.price;
+        if(!carDealer.adr.send(repurchaseCar.price)){
+            balance += repurchaseCar.price;
+            revert();
+        }    
+        ownedCar = 0 ;
+    }
+
+    function approveSellProposal() public isParticipant{
+        require(repurchaseCar.carId == 1, "no repurchased car in business");
+        require(!repurchaseVotes[msg.sender], "This participant already voted!");
+        repurchaseCar.approvedVotesCount += 1;
+        repurchaseVotes[msg.sender] = true;
+
+        if(repurchaseCar.approvedVotesCount > (participantsAddresses.length/2)){
+            repurchaseCarOp();
+        }
+    }
+
+
     function proposeDriver(uint expectedSalary) public payable{
         require(ownedCar == 1, "no owned car");
         require(!taxiDriver.isApproved, "There is a taxi driver already!");
-        taxiDriver = TaxiDriver(msg.sender, expectedSalary, false, 0, block.timestamp);
+        taxiDriver = TaxiDriver(msg.sender, expectedSalary, false, 0,  block.timestamp - (30 days));
         for(uint i = 0; i < participantsAddresses.length; i++){
             driverVotes[participantsAddresses[i]] = false;
         }
@@ -167,7 +202,7 @@ contract TaxiBusiness {
 
     function setDriver() public payable{
         require(taxiDriver.isApproved == false, "this driver already approved");
-        require(taxiDriver.approvedVotesCount >= (participantsAddresses.length/2), "not enough votes");
+        require(taxiDriver.approvedVotesCount > (participantsAddresses.length/2), "not enough votes");
         taxiDriver.isApproved = true;
         taxiDriver.approvedVotesCount = 0;
         for(uint i = 0; i < participantsAddresses.length; i++){
@@ -176,11 +211,13 @@ contract TaxiBusiness {
     }
 
     function approveDriver() public isParticipant{
+        require(taxiDriver.salary != 0, "no proposed driver yet");
+        require(taxiDriver.isApproved == false, "already approved driver");
         require(!driverVotes[msg.sender], "This participant already voted!");
         taxiDriver.approvedVotesCount += 1;
         driverVotes[msg.sender] = true;
 
-        if (taxiDriver.approvedVotesCount >= (participantsAddresses.length/2)){
+        if (taxiDriver.approvedVotesCount > (participantsAddresses.length/2)){
             setDriver();
         }
     }
@@ -201,21 +238,24 @@ contract TaxiBusiness {
         taxiDriver.approvedVotesCount += 1;
         driverVotes[msg.sender] = true;
 
-        if (taxiDriver.approvedVotesCount >= (participantsAddresses.length/2)){
+        if (taxiDriver.approvedVotesCount > (participantsAddresses.length/2)){
             fireDriver();
         }
     }
 
     function leaveJob() public isDriver{
+        require(taxiDriver.isApproved ,"no approved driver");
         fireDriver();
     }
 
 
     function getCharge() public payable {
+        require(taxiDriver.isApproved ,"no approved driver");
         balance += msg.value;
     }
 
     function getSalary() public isDriver{
+        require(taxiDriver.isApproved , "not an approved driver");
         require((block.timestamp - taxiDriver.lastSalaryTime) >= 30 days, "no payments again in same month");
         balance -= taxiDriver.salary;
         if( !taxiDriver.adr.send(taxiDriver.salary)){
