@@ -15,7 +15,7 @@ contract TaxiBusiness {
 
     struct CarDealer{
         address payable adr;     
-        uint ballance;  
+        uint balance;  
     }
 
     CarDealer carDealer;
@@ -103,8 +103,6 @@ contract TaxiBusiness {
         manager = msg.sender;
         balance = 0;
         maintenanceFee = 10 ether;
-        lastMaintenance = block.timestamp;
-        lastPayTime = block.timestamp;
         participationFee = 80 ether;
         carDealer = CarDealer(newCarDealer, 0);
     }
@@ -135,6 +133,7 @@ contract TaxiBusiness {
 
     function approvePurchaseCar() public isParticipant{
         require(!carVotes[msg.sender], "This participant already voted!");
+        require(ownedCar == 0, "There is already a car in business");
         proposedCar.approvedVotesCount += 1;
         carVotes[msg.sender] = true;
 
@@ -154,7 +153,7 @@ contract TaxiBusiness {
             revert();
         }
         ownedCar = proposedCar.carId;
-        proposedCar.isApproved = true
+        proposedCar.isApproved = true;
     }
 
     function proposeDriver(uint expectedSalary) public payable{
@@ -166,17 +165,6 @@ contract TaxiBusiness {
         }
     }
 
-    function approveDriver() public isParticipant{
-        require(!driverVotes[msg.sender], "This participant already voted!");
-        taxiDriver.approvedVotesCount += 1;
-        driverVotes[msg.sender] = true;
-
-        if (taxiDriver.approvedVotesCount >= (participantsAddresses.length/2)){
-
-        }
-    }
-
-
     function setDriver() public payable{
         require(taxiDriver.isApproved == false, "this driver already approved");
         require(taxiDriver.approvedVotesCount >= (participantsAddresses.length/2), "not enough votes");
@@ -187,7 +175,16 @@ contract TaxiBusiness {
         }
     }
 
-    
+    function approveDriver() public isParticipant{
+        require(!driverVotes[msg.sender], "This participant already voted!");
+        taxiDriver.approvedVotesCount += 1;
+        driverVotes[msg.sender] = true;
+
+        if (taxiDriver.approvedVotesCount >= (participantsAddresses.length/2)){
+            setDriver();
+        }
+    }
+
 
     function fireDriver() public payable{
         require(taxiDriver.isApproved == true, "No approved driver!");
@@ -199,6 +196,16 @@ contract TaxiBusiness {
         delete taxiDriver;
     }
 
+    function proposeFireDriver() public payable{
+        require(taxiDriver.isApproved == true, "there aren't any approved driver");
+        taxiDriver.approvedVotesCount += 1;
+        driverVotes[msg.sender] = true;
+
+        if (taxiDriver.approvedVotesCount >= (participantsAddresses.length/2)){
+            fireDriver();
+        }
+    }
+
     function leaveJob() public isDriver{
         fireDriver();
     }
@@ -207,11 +214,47 @@ contract TaxiBusiness {
     function getCharge() public payable {
         balance += msg.value;
     }
+
+    function getSalary() public isDriver{
+        require((block.timestamp - taxiDriver.lastSalaryTime) >= 30 days, "no payments again in same month");
+        balance -= taxiDriver.salary;
+        if( !taxiDriver.adr.send(taxiDriver.salary)){
+            balance += taxiDriver.salary;
+            revert();
+        }
+        taxiDriver.lastSalaryTime = block.timestamp;
+    }
+
+    function carExpenses() public isParticipant{
+        require((block.timestamp - lastMaintenance) >= 180 days, "already paid in those 6 months");
+        balance -= maintenanceFee;
+        if( !carDealer.adr.send(maintenanceFee)){
+            balance += maintenanceFee;
+            revert();
+        }
+        lastMaintenance = block.timestamp;
+    }
+
+
+    function payDivident() public isParticipant{
+        require((block.timestamp-lastPayTime)>= 180 days, "paid already");
+        require(balance > participationFee * participantsAddresses.length, "There is no profit right now");
+        uint dividend = (balance - (participationFee * participantsAddresses.length) - maintenanceFee - (6*taxiDriver.salary)) / participantsAddresses.length;
+        for(uint i = 0; i < participantsAddresses.length; i++){
+            participants[participantsAddresses[i]].balance += dividend;
+        }
+        balance = 0;
+        lastPayTime = block.timestamp; 
+    }
+
+    function getDivident() public isParticipant{
+        require(participants[msg.sender].balance > 0, "There is no ether in your balance");
+        if(!msg.sender.send(participants[msg.sender].balance)){
+            revert();
+        }
+        participants[msg.sender].balance = 0;
+    }
     
-
-
-
-
   
     /**
      * fallback function
