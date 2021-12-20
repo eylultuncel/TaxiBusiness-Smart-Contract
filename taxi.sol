@@ -106,7 +106,7 @@ contract TaxiBusiness {
         manager = msg.sender;
         balance = 0;
         maintenanceFee = 10 ether;
-        participationFee = 80 ether;
+        participationFee = 100 ether;
         carDealer = CarDealer(carDealerAddress, 0);
     }
 
